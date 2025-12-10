@@ -2,105 +2,305 @@ import './App.css';
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
-function App() {
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+const api = axios.create({ baseURL: API });
+
+function App() {
   const [itemText, setItemText] = useState('');
   const [listItems, setListItems] = useState([]);
-  const [isUpdating, setIsUpdating] = useState('');
+  const [isUpdating, setIsUpdating] = useState(null);
   const [updateItemText, setUpdateItemText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  const [token, setToken] = useState(() => localStorage.getItem('api_token') || '');
+  const [user, setUser] = useState(() => {
+    const cached = localStorage.getItem('api_user');
+    return cached ? JSON.parse(cached) : null;
+  });
+  const [authMode, setAuthMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  useEffect(() => {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      localStorage.setItem('api_token', token);
+      if (user) localStorage.setItem('api_user', JSON.stringify(user));
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+      localStorage.removeItem('api_token');
+      localStorage.removeItem('api_user');
+    }
+  }, [token, user]);
 
   const addItem = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/item', { "item": itemText });
-      setListItems(prev => [...prev, res.data]);
+      if (!itemText || itemText.trim().length === 0) return;
+      const res = await api.post('/api/item', { item: itemText });
+      setListItems(prev => [res.data, ...prev]);
       setItemText('');
-    } catch (error) {
-      console.log(error);
+      setError(null);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to add item');
     }
   }
 
   const deleteItem = async (id) => {
     try {
-      const res = await axios.delete(`http://localhost:5000/api/item/${id}`);
-      console.log(res.data);
+      await api.delete(`/api/item/${id}`);
       const newListItems = listItems.filter(item => item._id !== id);
       setListItems(newListItems);
-    } catch (error) {
-      console.log(error);
+      setError(null);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to delete item');
     }
   }
 
   const updateItem = async () => {
     try {
-      const res = await axios.put(`http://localhost:5000/api/item/${isUpdating}`, { item: updateItemText });
-      console.log(res.data);
-      const updatedItemIndex = listItems.findIndex(item => item._id === isUpdating);
-      const updatedItem = listItems[updatedItemIndex].item = updateItemText;
+      if (!updateItemText || updateItemText.trim().length === 0) return;
+      const res = await api.put(`/api/item/${isUpdating}`, { item: updateItemText });
+      setListItems(prev => prev.map(it => it._id === isUpdating ? { ...it, item: res.data.item } : it));
       setUpdateItemText('');
       setIsUpdating(null);
-    } catch (error) {
-      console.log(error);
+      setError(null);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to update item');
     }
   }
 
+  const cancelUpdate = () => {
+    setIsUpdating(null);
+    setUpdateItemText('');
+  }
+
+  const goPrev = () => {
+    if (page > 1) setPage(page - 1);
+  }
+
+  const goNext = () => {
+    if (meta?.totalPages && page < meta.totalPages) setPage(page + 1);
+  }
+
   useEffect(() => {
-    const getItemsList = async (e) => {
+    const getItemsList = async () => {
+      if (!token) {
+        setListItems([]);
+        setLoading(false);
+        setMeta({ page: 1, limit: 10, total: 0, totalPages: 1 });
+        return;
+      }
+      setLoading(true);
       try {
-        const res = await axios.get('http://localhost:5000/api/items');
-        setListItems(res.data);
-        console.log(res);
-      } catch (error) {
-        console.log(error);
+        const res = await api.get('/api/items', { params: { page, limit: meta.limit } });
+        if (Array.isArray(res.data)) {
+            setListItems(res.data);
+            setMeta({ page: 1, limit: res.data.length, total: res.data.length, totalPages: 1 });
+        } else {
+            setListItems(res.data.items || []);
+            setMeta(res.data.meta || { page: 1, limit: 10, total: 0, totalPages: 1 });
+        }
+        setError(null);
+      } catch (err) {
+        setError(err?.response?.data?.error || 'Failed to load items');
+      } finally {
+        setLoading(false);
       }
     }
     getItemsList();
-  }, []);
+  }, [token, page]);
 
-  // const getItems = async (e) => {
-  //   e.preventDefault();
-  //   try {
-  //     const res = await axios.get('https://localhost:5000/api/items');
-  //     console.log(res);
-  //   } catch (error) {
-  //     console.log(error);
-  //   }
-  // }
+  const submitAuth = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const res = await api.post(endpoint, { username, password });
+      if (res.data?.token) {
+        setToken(res.data.token);
+        setUser(res.data.user || null);
+        setPage(1);
+      }
+    } catch (err) {
+      setAuthError(err?.response?.data?.error || 'Authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
-  return (
-    <div className="App">
-      <div>
-        <h1>TO DO App</h1>
-        <div>
-          <div style={{ textAlign: "center" }}>
-            <div id="division">
-              <label htmlFor="input1" id="h3">Enter your note:</label>
-              <input style={{ marginRight: "15px", }} placeholder='Enter your text' value={itemText} onChange={e => setItemText(e.target.value)} type="text" id="input1" name="notes"></input>
-              <button style={{ fontSize: "25px", marginLeft: "15px", }} type="button" onClick={addItem}>Enter</button>
+  const logout = () => {
+    setToken('');
+    setUser(null);
+    setAuthError(null);
+    setPage(1);
+  }
+
+  // If not authenticated, show dedicated auth page
+  if (!token) {
+    return (
+      <div className="auth-page">
+        <div className="auth-shell">
+          <header className="hero auth-hero">
+            <div>
+              <p className="eyebrow">Welcome</p>
+              <h1>Sign in or Register</h1>
+              <p className="subtitle">Access your personal to-do list. Each account sees only its own items.</p>
             </div>
-            {listItems.map(item =>
-              item._id === isUpdating
-                ? <ul style={{ display: "flex", justifyContent: "space-around" }} key={item._id}>
-                  <input id='input1' style={{ fontSize: "20px", borderRadius: "5px", }} onChange={e => setUpdateItemText(e.target.value)} value={updateItemText}></input>
-                  <button style={{ marginTop: "15px", color: "black", backgroundColor: "green" }} onClick={updateItem}>Update</button>
-                </ul>
-                : <ul key={item._id}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }} >
-                    <p>{item.item}</p>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <button style={{ color: "black", backgroundColor: "yellow", margin: "10px" }} onClick={() => {
-                        setIsUpdating(item._id);
-                        setUpdateItemText(item.item);
-                      }}>Edit</button>
-                      <button style={{ color: "black", backgroundColor: "rgb(204, 70, 70)", margin: "10px" }} onClick={() => deleteItem(item._id)}>Delete</button>
-                    </div>
-                  </div>
-                </ul>
-            )}
-          </div>
+          </header>
+
+          <section className="card auth-card">
+            <div className="auth-header">
+              <div>
+                <p className="eyebrow">Authentication</p>
+                <h2 className="section-title">{authMode === 'login' ? 'Login to continue' : 'Create your account'}</h2>
+                <p className="subtitle">Your tasks are kept separate per user.</p>
+              </div>
+            </div>
+            <div className="auth-toggle">
+              <button
+                type="button"
+                className={`ghost-btn ${authMode === 'login' ? 'active-tab' : ''}`}
+                onClick={() => setAuthMode('login')}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                className={`ghost-btn ${authMode === 'register' ? 'active-tab' : ''}`}
+                onClick={() => setAuthMode('register')}
+              >
+                Register
+              </button>
+            </div>
+            <form className="auth-form" onSubmit={submitAuth}>
+              <div className="input-group">
+                <label>Username</label>
+                <input
+                  className="text-input"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="your username"
+                />
+              </div>
+              <div className="input-group">
+                <label>Password</label>
+                <input
+                  className="text-input"
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="your password"
+                />
+              </div>
+              <div className="auth-actions">
+                <button className="primary-btn" type="submit" disabled={authLoading}>
+                  {authLoading ? 'Submitting...' : authMode === 'login' ? 'Sign In' : 'Register'}
+                </button>
+              </div>
+              {authError && <div className="alert alert-error">{authError}</div>}
+            </form>
+          </section>
         </div>
       </div>
-    </div >
+    );
+  }
+
+  // Authenticated view
+  return (
+    <div className="page">
+      <header className="hero">
+        <div>
+          <p className="eyebrow">Plan. Track. Complete.</p>
+          <h1>Your To-Do List</h1>
+          <p className="subtitle">Stay organized with quick add, edit, and delete.</p>
+        </div>
+        <div className="auth-status">
+          <span className="badge">{user?.username || 'Authenticated'}</span>
+          <button className="ghost-btn" type="button" onClick={logout}>Logout</button>
+        </div>
+      </header>
+
+      <main className="content">
+        <section className="card">
+          <form className="input-row" onSubmit={addItem}>
+            <input
+              className="text-input"
+              placeholder="Add a new task..."
+              value={itemText}
+              onChange={e => setItemText(e.target.value)}
+            />
+            <button className="primary-btn" type="submit" disabled={!itemText.trim()}>
+              Add
+            </button>
+          </form>
+
+          {error && <div className="alert alert-error">{error}</div>}
+
+          {loading && (
+            <div className="loading">Loading your tasks...</div>
+          )}
+
+          {!loading && listItems.length === 0 && (
+            <div className="empty-state">
+              <h3>No tasks yet</h3>
+              <p>Start by adding your first task above.</p>
+            </div>
+          )}
+
+          {!loading && listItems.length > 0 && (
+            <ul className="todo-list">
+              {listItems.map(item => (
+                <li key={item._id} className="todo-item">
+                  {item._id === isUpdating ? (
+                    <div className="todo-edit-row">
+                      <input
+                        className="text-input"
+                        value={updateItemText}
+                        onChange={e => setUpdateItemText(e.target.value)}
+                      />
+                      <div className="actions">
+                        <button className="primary-btn" type="button" onClick={updateItem} disabled={!updateItemText.trim()}>
+                          Save
+                        </button>
+                        <button className="ghost-btn" type="button" onClick={cancelUpdate}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="todo-row">
+                      <div>
+                        <p className="todo-text">{item.item}</p>
+                      </div>
+                      <div className="actions">
+                        <button className="ghost-btn" type="button" onClick={() => {
+                          setIsUpdating(item._id);
+                          setUpdateItemText(item.item);
+                        }}>Edit</button>
+                        <button className="danger-btn" type="button" onClick={() => deleteItem(item._id)}>Delete</button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {!loading && listItems.length > 0 && (
+            <div className="pagination">
+              <button className="ghost-btn" type="button" onClick={goPrev} disabled={page <= 1}>Prev</button>
+              <span className="page-meta">Page {meta.page} of {meta.totalPages || 1}</span>
+              <button className="ghost-btn" type="button" onClick={goNext} disabled={page >= (meta.totalPages || 1)}>Next</button>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
   );
 }
 
