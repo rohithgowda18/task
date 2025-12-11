@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const todoItemsSchema = new mongoose.Schema({
+        notes: {
+            type: String,
+            trim: true,
+            default: ''
+        },
     item: {
         type: String,
         required: true,
@@ -13,6 +18,29 @@ const todoItemsSchema = new mongoose.Schema({
         ref: 'User',
         required: true,
         index: true
+    },
+    category: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    label: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    priority: {
+        type: String,
+        enum: ['low', 'medium', 'high'],
+        default: 'medium'
+    },
+    deadline: {
+        type: Date,
+        default: null
+    },
+    completed: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 

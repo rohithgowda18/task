@@ -1,5 +1,6 @@
 import './App.css';
 import React, { useEffect, useState } from 'react';
+import AddTask from './AddTask';
 import axios from 'axios';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -7,7 +8,21 @@ const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 const api = axios.create({ baseURL: API });
 
 function App() {
+      const [showAddTask, setShowAddTask] = useState(false);
+    const [filterCategory, setFilterCategory] = useState('');
+    const [filterLabel, setFilterLabel] = useState('');
+    const [filterPriority, setFilterPriority] = useState('');
   const [itemText, setItemText] = useState('');
+  const [deadline, setDeadline] = useState('');
+  const [completed, setCompleted] = useState(false);
+  const [updateDeadline, setUpdateDeadline] = useState('');
+  const [updateCompleted, setUpdateCompleted] = useState(false);
+  const [category, setCategory] = useState('');
+  const [label, setLabel] = useState('');
+  const [priority, setPriority] = useState('medium');
+  const [updateCategory, setUpdateCategory] = useState('');
+  const [updateLabel, setUpdateLabel] = useState('');
+  const [updatePriority, setUpdatePriority] = useState('medium');
   const [listItems, setListItems] = useState([]);
   const [isUpdating, setIsUpdating] = useState(null);
   const [updateItemText, setUpdateItemText] = useState('');
@@ -38,18 +53,14 @@ function App() {
     }
   }, [token, user]);
 
-  const addItem = async (e) => {
-    e.preventDefault();
-    try {
-      if (!itemText || itemText.trim().length === 0) return;
-      const res = await api.post('/api/item', { item: itemText });
-      setListItems(prev => [res.data, ...prev]);
-      setItemText('');
-      setError(null);
-    } catch (err) {
-      setError(err?.response?.data?.error || 'Failed to add item');
-    }
-  }
+  const handleTaskAdded = (task) => {
+    setListItems(prev => [task, ...prev]);
+    setShowAddTask(false);
+    setError(null);
+  };
+  const handleCancelAddTask = () => {
+    setShowAddTask(false);
+  };
 
   const deleteItem = async (id) => {
     try {
@@ -65,9 +76,21 @@ function App() {
   const updateItem = async () => {
     try {
       if (!updateItemText || updateItemText.trim().length === 0) return;
-      const res = await api.put(`/api/item/${isUpdating}`, { item: updateItemText });
-      setListItems(prev => prev.map(it => it._id === isUpdating ? { ...it, item: res.data.item } : it));
+      const res = await api.put(`/api/item/${isUpdating}`, {
+        item: updateItemText,
+        category: updateCategory,
+        label: updateLabel,
+        priority: updatePriority,
+        deadline: updateDeadline || null,
+        completed: updateCompleted
+      });
+      setListItems(prev => prev.map(it => it._id === isUpdating ? { ...it, ...res.data } : it));
       setUpdateItemText('');
+      setUpdateCategory('');
+      setUpdateLabel('');
+      setUpdatePriority('medium');
+      setUpdateDeadline('');
+      setUpdateCompleted(false);
       setIsUpdating(null);
       setError(null);
     } catch (err) {
@@ -78,6 +101,19 @@ function App() {
   const cancelUpdate = () => {
     setIsUpdating(null);
     setUpdateItemText('');
+    setUpdateCategory('');
+    setUpdateLabel('');
+    setUpdatePriority('medium');
+    setUpdateDeadline('');
+    setUpdateCompleted(false);
+  }
+  const toggleCompleted = async (id, current) => {
+    try {
+      const res = await api.patch(`/api/item/${id}/completed`, { completed: !current });
+      setListItems(prev => prev.map(it => it._id === id ? { ...it, completed: res.data.completed } : it));
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to update completed status');
+    }
   }
 
   const goPrev = () => {
@@ -98,7 +134,14 @@ function App() {
       }
       setLoading(true);
       try {
-        const res = await api.get('/api/items', { params: { page, limit: meta.limit } });
+        const params = {
+          page,
+          limit: meta.limit
+        };
+        if (filterCategory) params.category = filterCategory;
+        if (filterLabel) params.label = filterLabel;
+        if (filterPriority) params.priority = filterPriority;
+        const res = await api.get('/api/items', { params });
         if (Array.isArray(res.data)) {
             setListItems(res.data);
             setMeta({ page: 1, limit: res.data.length, total: res.data.length, totalPages: 1 });
@@ -114,7 +157,7 @@ function App() {
       }
     }
     getItemsList();
-  }, [token, page]);
+  }, [token, page, filterCategory, filterLabel, filterPriority]);
 
   const submitAuth = async (e) => {
     e.preventDefault();
@@ -229,17 +272,43 @@ function App() {
 
       <main className="content">
         <section className="card">
-          <form className="input-row" onSubmit={addItem}>
+          <div className="filter-row">
             <input
               className="text-input"
-              placeholder="Add a new task..."
-              value={itemText}
-              onChange={e => setItemText(e.target.value)}
+              placeholder="Filter by category"
+              value={filterCategory}
+              onChange={e => setFilterCategory(e.target.value)}
             />
-            <button className="primary-btn" type="submit" disabled={!itemText.trim()}>
-              Add
+            <input
+              className="text-input"
+              placeholder="Filter by label"
+              value={filterLabel}
+              onChange={e => setFilterLabel(e.target.value)}
+            />
+            <select
+              className="text-input"
+              value={filterPriority}
+              onChange={e => setFilterPriority(e.target.value)}
+            >
+              <option value="">All Priorities</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <button className="ghost-btn" type="button" onClick={() => {
+              setFilterCategory('');
+              setFilterLabel('');
+              setFilterPriority('');
+            }}>Clear Filters</button>
+          </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <button className="primary-btn" type="button" onClick={() => setShowAddTask(true)}>
+              Add New Task
             </button>
-          </form>
+          </div>
+          {showAddTask && (
+            <AddTask onTaskAdded={handleTaskAdded} onCancel={handleCancelAddTask} />
+          )}
 
           {error && <div className="alert alert-error">{error}</div>}
 
@@ -265,6 +334,41 @@ function App() {
                         value={updateItemText}
                         onChange={e => setUpdateItemText(e.target.value)}
                       />
+                      <input
+                        className="text-input"
+                        placeholder="Category"
+                        value={updateCategory}
+                        onChange={e => setUpdateCategory(e.target.value)}
+                      />
+                      <input
+                        className="text-input"
+                        placeholder="Label"
+                        value={updateLabel}
+                        onChange={e => setUpdateLabel(e.target.value)}
+                      />
+                      <select
+                        className="text-input"
+                        value={updatePriority}
+                        onChange={e => setUpdatePriority(e.target.value)}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                      <input
+                        className="text-input"
+                        type="datetime-local"
+                        value={updateDeadline}
+                        onChange={e => setUpdateDeadline(e.target.value)}
+                      />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="checkbox"
+                          checked={updateCompleted}
+                          onChange={e => setUpdateCompleted(e.target.checked)}
+                        />
+                        Completed
+                      </label>
                       <div className="actions">
                         <button className="primary-btn" type="button" onClick={updateItem} disabled={!updateItemText.trim()}>
                           Save
@@ -276,11 +380,27 @@ function App() {
                     <div className="todo-row">
                       <div>
                         <p className="todo-text">{item.item}</p>
+                        <p className="todo-meta">Category: {item.category || '-'} | Label: {item.label || '-'} | Priority: {item.priority || 'medium'}</p>
+                        <p className="todo-meta">Deadline: {item.deadline ? new Date(item.deadline).toLocaleString() : '-'}</p>
+                        <p className="todo-meta">Notes: {item.notes || '-'}</p>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => toggleCompleted(item._id, item.completed)}
+                          />
+                          Completed
+                        </label>
                       </div>
                       <div className="actions">
                         <button className="ghost-btn" type="button" onClick={() => {
                           setIsUpdating(item._id);
                           setUpdateItemText(item.item);
+                          setUpdateCategory(item.category || '');
+                          setUpdateLabel(item.label || '');
+                          setUpdatePriority(item.priority || 'medium');
+                          setUpdateDeadline(item.deadline ? item.deadline.slice(0, 16) : '');
+                          setUpdateCompleted(!!item.completed);
                         }}>Edit</button>
                         <button className="danger-btn" type="button" onClick={() => deleteItem(item._id)}>Delete</button>
                       </div>

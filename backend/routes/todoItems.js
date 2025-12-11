@@ -63,11 +63,20 @@ router.use(authRequired);
 
 router.post('/api/item', async (req, res) => {
     try {
-        const { item } = req.body;
+        const { item, category, label, priority, deadline, completed, notes } = req.body;
         if (!item || String(item).trim().length === 0) {
             return res.status(400).json({ error: 'Item text is required' });
         }
-        const newItem = new todoItemsModel({ item, userId: req.user.id });
+        const newItem = new todoItemsModel({
+            item,
+            userId: req.user.id,
+            category: category || '',
+            label: label || '',
+            priority: priority || 'medium',
+            deadline: deadline ? new Date(deadline) : null,
+            completed: completed === true,
+            notes: notes || ''
+        });
         const saveItem = await newItem.save();
         return res.status(201).json(saveItem);
     } catch (error) {
@@ -82,9 +91,18 @@ router.get('/api/items', async (req, res) => {
         const limit = Math.min(Math.max(limitRaw, 1), 100);
         const skip = (page - 1) * limit;
 
+        // Filtering by category, label, priority, deadline, completed
+        const filter = { userId: req.user.id };
+        if (req.query.category) filter.category = { $regex: req.query.category, $options: 'i' };
+        if (req.query.label) filter.label = { $regex: req.query.label, $options: 'i' };
+        if (req.query.priority) filter.priority = req.query.priority;
+        if (req.query.completed !== undefined) filter.completed = req.query.completed === 'true';
+        if (req.query.deadlineBefore) filter.deadline = { $lte: new Date(req.query.deadlineBefore) };
+        if (req.query.deadlineAfter) filter.deadline = { ...(filter.deadline || {}), $gte: new Date(req.query.deadlineAfter) };
+
         const [items, total] = await Promise.all([
-            todoItemsModel.find({ userId: req.user.id }).sort({ createdAt: -1 }).skip(skip).limit(limit),
-            todoItemsModel.countDocuments({ userId: req.user.id })
+            todoItemsModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+            todoItemsModel.countDocuments(filter)
         ]);
 
         const totalPages = Math.max(Math.ceil(total / limit), 1);
@@ -101,13 +119,20 @@ router.get('/api/items', async (req, res) => {
 router.put('/api/item/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { item } = req.body;
+        const { item, category, label, priority, deadline, completed, notes } = req.body;
         if (!item || String(item).trim().length === 0) {
             return res.status(400).json({ error: 'Item text is required' });
         }
+        const updateFields = { item };
+        if (category !== undefined) updateFields.category = category;
+        if (label !== undefined) updateFields.label = label;
+        if (priority !== undefined) updateFields.priority = priority;
+        if (deadline !== undefined) updateFields.deadline = deadline ? new Date(deadline) : null;
+        if (completed !== undefined) updateFields.completed = completed;
+        if (notes !== undefined) updateFields.notes = notes;
         const updateItem = await todoItemsModel.findOneAndUpdate(
             { _id: id, userId: req.user.id },
-            { $set: { item } },
+            { $set: updateFields },
             { new: true }
         );
         if (!updateItem) return res.status(404).json({ error: 'Item not found' });
@@ -115,6 +140,25 @@ router.put('/api/item/:id', async (req, res) => {
     } catch (error) {
         return sendServerError(res, error);
     }
+// Mark task as completed/uncompleted
+router.patch('/api/item/:id/completed', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { completed } = req.body;
+        if (typeof completed !== 'boolean') {
+            return res.status(400).json({ error: 'Completed must be a boolean' });
+        }
+        const updateItem = await todoItemsModel.findOneAndUpdate(
+            { _id: id, userId: req.user.id },
+            { $set: { completed } },
+            { new: true }
+        );
+        if (!updateItem) return res.status(404).json({ error: 'Item not found' });
+        return res.status(200).json(updateItem);
+    } catch (error) {
+        return sendServerError(res, error);
+    }
+});
 });
 
 router.delete('/api/item/:id', async (req, res) => {

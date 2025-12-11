@@ -28,51 +28,14 @@ app.use(limiter);
 const todoItemsRoute = require('./routes/todoItems')
 
 async function start() {
-    let mongoUri = process.env.MONGO_URI;
-    const allowInMemory = process.env.ALLOW_INMEMORY_MONGO === 'true';
-
-    // If no MONGO_URI provided, optionally fall back to in-memory only when explicitly allowed
-    if (!mongoUri) {
-        if (!allowInMemory) {
-            console.error('MONGO_URI is missing. Set MONGO_URI to a persistent MongoDB connection string to keep data across restarts.');
-            process.exit(1);
-        }
-        try {
-            const { MongoMemoryServer } = require('mongodb-memory-server');
-            const mongod = await MongoMemoryServer.create();
-            mongoUri = mongod.getUri();
-            console.log('Started in-memory MongoDB (data is ephemeral).');
-        } catch (err) {
-            console.error('Failed to start in-memory MongoDB:', err);
-            process.exit(1);
-        }
-    }
-
-    const connectWithUri = async (uri, label) => {
-        await mongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
-        console.log(`Database Connected (${label})`);
-    };
+    const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/todo-list-app';
 
     try {
-        await connectWithUri(mongoUri, 'primary');
+        await mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true });
+        console.log(`Database Connected (${mongoUri})`);
     } catch (err) {
         console.error('Database connection error:', err.message || err);
-
-        // If persistent DB is unreachable and in-memory is explicitly allowed, fall back
-        if (allowInMemory) {
-            try {
-                const { MongoMemoryServer } = require('mongodb-memory-server');
-                const mongod = await MongoMemoryServer.create();
-                const memoryUri = mongod.getUri();
-                await connectWithUri(memoryUri, 'in-memory fallback (ephemeral)');
-            } catch (memErr) {
-                console.error('Failed to start in-memory MongoDB after primary connection failure:', memErr);
-                process.exit(1);
-            }
-        } else {
-            // Hard fail when no fallback is permitted
-            process.exit(1);
-        }
+        process.exit(1);
     }
 
     app.use('/', todoItemsRoute);
